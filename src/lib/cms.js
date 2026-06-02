@@ -32,7 +32,8 @@ function readEnv(name) {
 }
 
 const config = {
-  url: readEnv("CMS_URL") ?? "http://localhost:8000",
+  // Strip any trailing slash so `${url}/api/kql` can't become `//api/kql` (404).
+  url: (readEnv("CMS_URL") ?? "http://localhost:8000").replace(/\/+$/, ""),
   token: readEnv("CMS_TOKEN") ?? "",
 };
 
