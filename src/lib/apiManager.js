@@ -12,7 +12,12 @@ const ARTIST_FIELDS = {
 	url: true,
 	name: true,
 	surname: true,
-	file: { url: true },
+	// `files` / `files_vertical` are Kirby files fields, each storing a
+	// `file://uuid` reference (the panel labels "Files" / "Files-vertical" are
+	// stored with an underscore). Resolve each to the file's URL, or null when
+	// unset. Returned as plain URL strings under `file` / `vertical_file`.
+	file: "page.content.get('files').toFile?.url",
+	vertical_file: "page.content.get('files_vertical').toFile?.url",
 };
 
 /** All listed artists, each augmented with a `slug` derived from its url. */

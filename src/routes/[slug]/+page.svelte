@@ -2,6 +2,7 @@
 	import { onMount } from "svelte";
 	import { goto } from "$app/navigation";
 	import { app_two } from "$lib/three/app_two.js";
+	import { loading } from "$lib/loading.js";
 
 	let { data } = $props();
 
@@ -32,12 +33,24 @@
 	});
 
 	onMount(() => {
+		// Show the loader until the carousel reports the first videos are ready.
+		loading.set(true);
+
 		canvas.style.width = window.innerWidth + "px";
 		canvas.style.height = window.innerHeight + "px";
 
+		// Portrait viewports use each artist's vertical source when it exists,
+		// falling back to the horizontal `file` otherwise. Tracked so we can
+		// reload the sources live when the viewport flips orientation.
+		let isPortrait = window.innerHeight > window.innerWidth;
+		const sourcesForViewport = () =>
+			data.artists.map(
+				(a) => (isPortrait ? a.vertical_file : a.file) || a.file,
+			);
+
 		app = app_two({
 			canvas,
-			images: data.artists.map((a) => a.file?.url),
+			images: sourcesForViewport(),
 			startIndex: data.index,
 			// Each advance changes the artist → reflect it in the URL + title.
 			onChange: (index) => {
@@ -47,6 +60,8 @@
 					keepFocus: true,
 				});
 			},
+			// Centre + left/right textures are ready → hide the loader.
+			onReady: () => loading.set(false),
 		});
 		app.init();
 
@@ -58,6 +73,13 @@
 				width: window.innerWidth,
 				height: window.innerHeight,
 			});
+			// Crossing the square boundary flips orientation → reload the matching
+			// (vertical vs horizontal) sources.
+			const portrait = window.innerHeight > window.innerWidth;
+			if (portrait !== isPortrait) {
+				isPortrait = portrait;
+				app.setImages(sourcesForViewport());
+			}
 		};
 		const onMouseMove = (ev) => app.onEventHandler("mousemove", { ev });
 		const onClick = (ev) => app.onEventHandler("click", { ev });

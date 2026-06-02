@@ -14,10 +14,14 @@ import { fragmentShader } from "./shader/fragment.js";
 import { applyCarousel, loadTexture, textureSize } from "./texturesManager.js";
 import { PARAMS } from "../PARAMS.js";
 
-export const app_two = ({ canvas, images, startIndex = 0, onChange } = {}) => {
-	const sources = (images && images.length ? images : [null]).map(
-		(src) => src || randomFallback(),
-	);
+export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = {}) => {
+	// Normalise an images array into renderable sources: empty list → one
+	// fallback, and any missing entry → a random fallback image.
+	const normalizeSources = (imgs) =>
+		(imgs && imgs.length ? imgs : [null]).map((src) => src || randomFallback());
+
+	let sources = normalizeSources(images);
+
 
 	const clock = new THREE.Clock();
 	let elapsed = 0; // accumulated seconds, fed to uTime
@@ -33,6 +37,12 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange } = {}) => {
 	let camera;
 	let material;
 	let textures = [];
+	// Distinct loaded textures, so dispose() frees each once even while several
+	// `textures` slots still point at a placeholder during background loading.
+	const loaded = new Set();
+	// Bumped whenever the source set changes (setImages). In-flight loads check
+	// it and bail if a newer load has superseded them.
+	let generation = 0;
 	const carousel = { center: startIndex % Math.max(sources.length, 1) };
 	const reveal = { active: false, t: 0, dir: 1 };
 	// Hover peek fade: ramps 0 -> 1 after a reveal so the peek eases back in.
@@ -55,8 +65,27 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange } = {}) => {
 		renderer.setSize(window.innerWidth, window.innerHeight, false);
 		scene = new THREE.Scene();
 		camera = new THREE.Camera();
-		textures = await Promise.all(sources.map(loadTexture));
+
+		// Load only what the first paint needs — the centred artist plus its
+		// left/right neighbours — so the loader can clear ASAP. The remaining
+		// sources stream in afterwards (see loadRemaining), in time for the
+		// next navigation. Until a slot loads it points at the centre texture.
+		const n = sources.length;
+		const c = carousel.center;
+		const priority = [...new Set([c, (c - 1 + n) % n, (c + 1) % n])];
+		textures = new Array(n);
+		await Promise.all(
+			priority.map(async (i) => {
+				const tex = await loadTexture(sources[i]);
+				textures[i] = tex;
+				loaded.add(tex);
+			}),
+		);
 		const center = textures[carousel.center];
+		// Fill not-yet-loaded slots with the centre texture so applyCarousel and
+		// the shader always have a valid sampler; loadRemaining swaps in the real
+		// ones as they arrive.
+		for (let i = 0; i < n; i++) if (!textures[i]) textures[i] = center;
 		material = new THREE.ShaderMaterial({
 			vertexShader,
 			fragmentShader,
@@ -90,6 +119,30 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange } = {}) => {
 		quad.frustumCulled = false;
 		scene.add(quad);
 		resize(window.innerWidth, window.innerHeight);
+
+		// The visible three are ready — clear the loader, then stream the rest.
+		onReady?.();
+		loadRemaining(priority);
+	}
+
+	// Load every source not already loaded (the priority three are skipped) and
+	// swap each into its slot. These aren't visible until the carousel advances,
+	// by which point the slot holds the real texture instead of the placeholder.
+	async function loadRemaining(skip) {
+		const gen = generation;
+		const mySources = sources;
+		const skipSet = new Set(skip);
+		for (let i = 0; i < mySources.length; i++) {
+			if (skipSet.has(i)) continue;
+			const tex = await loadTexture(mySources[i]);
+			// Bail if the instance was disposed or the source set was swapped.
+			if (!material || gen !== generation) {
+				tex.dispose?.();
+				return;
+			}
+			textures[i] = tex;
+			loaded.add(tex);
+		}
 	}
 
 	function resize(w, h) {
@@ -194,6 +247,48 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange } = {}) => {
 		material.uniforms.uHoverFade.value = 1;
 	}
 
+	// Swap in a new set of sources (e.g. the vertical variants when the viewport
+	// flips to portrait) without recreating the renderer. Reloads the textures,
+	// snaps the carousel to the new ones at the current centre, and disposes the
+	// old ones once the new textures are bound.
+	async function setImages(nextImages) {
+		if (!material) return;
+		const next = normalizeSources(nextImages);
+		// Supersede any in-flight load (initial background fill or a prior swap).
+		const gen = ++generation;
+		const nextTextures = await Promise.all(next.map(loadTexture));
+		// Bail if disposed or superseded by a newer setImages while loading.
+		if (!material || gen !== generation) {
+			for (const t of nextTextures) t.dispose?.();
+			return;
+		}
+		// Dispose the textures the old set owned, then track the new ones.
+		for (const t of loaded) t.dispose?.();
+		loaded.clear();
+		for (const t of nextTextures) loaded.add(t);
+		sources = next;
+		textures = nextTextures;
+		const n = textures.length;
+		carousel.center = ((carousel.center % n) + n) % n;
+		// Cancel any in-flight reveal so the swap is a clean snap.
+		reveal.active = false;
+		reveal.t = 0;
+		material.uniforms.uReveal.value = 0;
+		applyCarousel(material, textures, carousel.center);
+		// Point the crossfade "prev" slots at the new sources too, so nothing
+		// keeps referencing the old textures we're about to dispose, then settle
+		// the crossfade/hover so the new sources show immediately (no blend).
+		const u = material.uniforms;
+		u.uTextureAPrev.value = u.uTextureA.value;
+		u.uTextureCPrev.value = u.uTextureC.value;
+		u.uSizeAPrev.value.copy(u.uSizeA.value);
+		u.uSizeCPrev.value.copy(u.uSizeC.value);
+		peekMix.t = 1;
+		u.uPeekMix.value = 1;
+		hoverFade.t = 1;
+		u.uHoverFade.value = 1;
+	}
+
 	// Free GPU resources when the component using this instance unmounts.
 	function dispose() {
 		if (renderer) {
@@ -201,7 +296,10 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange } = {}) => {
 			renderer.forceContextLoss?.();
 		}
 		material?.dispose();
-		for (const t of textures) t.dispose?.();
+		material = null; // also makes the in-flight-load guards fire
+		generation++; // cancel any background/swap load still in flight
+		for (const t of loaded) t.dispose?.();
+		loaded.clear();
 	}
 
 	return {
@@ -209,6 +307,7 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange } = {}) => {
 		draw,
 		onEventHandler,
 		jumpTo,
+		setImages,
 		dispose,
 	};
 };
