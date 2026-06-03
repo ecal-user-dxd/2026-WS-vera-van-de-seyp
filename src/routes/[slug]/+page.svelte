@@ -34,43 +34,47 @@
 	});
 
 	const DURATION = 800;
-	// Width of the soft gradient band at the wipe edge (% of the swept axis).
-	const FEATHER = 28;
-	// Peak blur applied to the part being wiped, mid-transition.
+	// Peak blur applied while a title is mid-transition.
 	const MAX_BLUR = 14;
+	// How far a title slides (% of the swept axis) as it enters/leaves.
+	const SHIFT = 12;
+	// Width of the soft trailing-edge feather (% of the swept axis).
+	const FEATHER = 35;
 
-	// Builds the moving soft-edge mask + blur. `progress` runs 0 → 1 across the
-	// wipe; the edge sweeps the whole axis, feathered into a transparent ramp so
-	// the wiped part fades by opacity gradient, and blur peaks halfway through so
-	// it also goes out of focus. `reveal` shows the new title ahead of the edge;
-	// otherwise the old title is erased behind it. Landscape sweeps horizontally,
-	// portrait vertically, mirrored by `direction`.
-	function wipeCss(progress, direction, vertical, reveal) {
-		const edge = -FEATHER + progress * (100 + 2 * FEATHER);
-		const blur = Math.sin(progress * Math.PI) * MAX_BLUR;
+	// Both titles transition at once and overlap: the outgoing one blurs, fades
+	// (opacity) and slides out while the incoming one blurs, fades and slides in
+	// from the opposite side — so for a moment you see both. A soft directional
+	// gradient mask feathers the leaving edge so the dissolve reads as a wipe.
+	// `t` is this title's own presence: 1 = fully here, 0 = fully gone.
+	// Landscape sweeps horizontally, portrait vertically, mirrored by `direction`.
+	function wipeCss(t, direction, vertical, reveal) {
+		const gone = 1 - t;
+		const blur = gone * MAX_BLUR;
+		// New enters from -direction, old exits toward +direction (one shared flow).
+		const offset = gone * SHIFT * direction * (reveal ? -1 : 1);
+		const translate = vertical
+			? `translateY(${offset}%)`
+			: `translateX(${offset}%)`;
 		const side = vertical
 			? direction === -1
 				? "to top"
 				: "to bottom"
-			: direction === -1
+			: direction === 1
 				? "to left"
 				: "to right";
-		const stops = reveal
-			? `black ${edge - FEATHER}%, transparent ${edge + FEATHER}%`
-			: `transparent ${edge - FEATHER}%, black ${edge + FEATHER}%`;
-		const mask = `linear-gradient(${side}, ${stops})`;
-		return `filter: blur(${blur}px); -webkit-mask-image: ${mask}; mask-image: ${mask};`;
+		// Feather the trailing edge; grows as the title leaves, keeps it gradient-y
+		// without fully hiding (opacity carries most of the fade so both stay visible).
+		const fade = gone * FEATHER;
+		const mask = `linear-gradient(${side}, transparent 0%, black ${fade}%, black 100%)`;
+		return `opacity: ${t}; filter: blur(${blur}px); transform: ${translate}; -webkit-mask-image: ${mask}; mask-image: ${mask};`;
 	}
 
-	// The old title is erased and the new one revealed by the same sweeping
-	// edge, so they cross-dissolve through a single soft, blurry band in one
-	// pass (mirrored when direction is -1; vertical on portrait).
 	function wipeOut(node, { direction = 1, vertical = false } = {}) {
 		return {
 			duration: DURATION,
 			easing: cubicInOut,
-			// t runs 1 → 0, so progress = 1 - t.
-			css: (t) => wipeCss(1 - t, direction, vertical, false),
+			// t runs 1 → 0 (present → gone).
+			css: (t) => wipeCss(t, direction, vertical, false),
 		};
 	}
 
@@ -78,7 +82,7 @@
 		return {
 			duration: DURATION,
 			easing: cubicInOut,
-			// t runs 0 → 1.
+			// t runs 0 → 1 (gone → present).
 			css: (t) => wipeCss(t, direction, vertical, true),
 		};
 	}
@@ -115,6 +119,11 @@
 		});
 		app.init();
 		app.setOrientation(isPortrait);
+		// Touch devices have no hover; bend the vertex per-transition instead.
+		app.setTouch(
+			window.matchMedia?.("(pointer: coarse)").matches ||
+				"ontouchstart" in window,
+		);
 
 		const onResize = (ev) => {
 			canvas.style.width = window.innerWidth + "px";

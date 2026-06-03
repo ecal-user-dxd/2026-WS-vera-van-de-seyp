@@ -1,6 +1,12 @@
 import * as THREE from "three";
 import { lerp } from "./utils.js";
 
+// GLSL-style smoothstep: 0 below e0, 1 above e1, eased Hermite in between.
+const smoothstep = (e0, e1, x) => {
+	const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1);
+	return t * t * (3 - 2 * t);
+};
+
 // Bundled fallbacks: any artist with no thumbnail in the CMS gets a random
 // one of these instead.
 import fallbackA from "../assets/CleanShot 2026-06-01 at 15.44.25@2x.png";
@@ -48,6 +54,9 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 	// Navigation axis: 0 = horizontal (landscape, left/right), 1 = vertical
 	// (portrait, top/bottom). Set from the component via setOrientation.
 	let axis = 0;
+	// Touch devices have no hover, so the vertex bend is pulsed once per
+	// transition instead of following the pointer. Set via setTouch.
+	let touchMode = false;
 	// Hover peek fade: ramps 0 -> 1 after a reveal so the peek eases back in.
 	const hoverFade = { t: 1 };
 	// Peek-slot crossfade: ramps 0 -> 1 so A/C texture swaps blend, not cut.
@@ -107,6 +116,7 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 				uRevealDir: { value: 1 },
 				uHoverFade: { value: 1 },
 				uAxis: { value: axis },
+				uBend: { value: 0 },
 				// Peek-slot crossfade: prev source + size, and the 0->1 mix.
 				uTextureAPrev: { value: center },
 				uTextureCPrev: { value: center },
@@ -169,6 +179,19 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 		mouse.y = lerp(mouse.y, mouse.targetY, smooth);
 		material.uniforms.uMouse.value.set(mouse.x, mouse.y);
 		material.uniforms.uTime.value = elapsed;
+
+		// Vertex bend. On touch there's no hover, so it pulses once per transition
+		// (0 at the start, peaks mid-reveal, back to 0 at the end). On pointer
+		// devices it tracks the cursor's distance to the edges along the active
+		// axis, bulging as it nears them — the same hover bulge as before.
+		let bend;
+		if (touchMode) {
+			bend = reveal.active ? Math.sin(reveal.t * Math.PI) : 0;
+		} else {
+			const coord = axis === 1 ? mouse.y : mouse.x;
+			bend = Math.max(smoothstep(0.3, 0.0, coord), smoothstep(0.7, 1.0, coord));
+		}
+		material.uniforms.uBend.value = bend;
 
 		// Ease the hover peek back in after a reveal so it doesn't pop in abruptly.
 		hoverFade.t = Math.min(hoverFade.t + delta / HOVER_FADE_DURATION, 1.0);
@@ -248,6 +271,12 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 	function setOrientation(isPortrait) {
 		axis = isPortrait ? 1 : 0;
 		if (material) material.uniforms.uAxis.value = axis;
+	}
+
+	// Mark whether the device is touch (no hover). When true, the vertex bend is
+	// pulsed once per transition instead of following the pointer.
+	function setTouch(isTouch) {
+		touchMode = !!isTouch;
 	}
 
 	// Snap the centre to a given artist index without animation. Used to keep
@@ -331,6 +360,7 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 		onEventHandler,
 		navigate,
 		setOrientation,
+		setTouch,
 		jumpTo,
 		setImages,
 		dispose,
