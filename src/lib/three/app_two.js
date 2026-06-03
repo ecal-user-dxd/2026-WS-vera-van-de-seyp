@@ -186,10 +186,14 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 		// axis, bulging as it nears them — the same hover bulge as before.
 		let bend;
 		if (touchMode) {
-			bend = reveal.active ? Math.sin(reveal.t * Math.PI) : 0;
+			// No hover on touch, so keep the bulge always on.
+			bend = 1;
 		} else {
-			const coord = axis === 1 ? mouse.y : mouse.x;
-			bend = Math.max(smoothstep(0.3, 0.0, coord), smoothstep(0.7, 1.0, coord));
+			// Bulge as the cursor nears any edge, on both axes (all directions),
+			// ramping in from 0.4 / 0.6 toward the screen edges.
+			const edgeBend = (coord) =>
+				Math.max(smoothstep(0.4, 0.0, coord), smoothstep(0.6, 1.0, coord));
+			bend = Math.max(edgeBend(mouse.x), edgeBend(mouse.y));
 		}
 		material.uniforms.uBend.value = bend;
 

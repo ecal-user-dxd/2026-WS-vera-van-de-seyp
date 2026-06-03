@@ -4,11 +4,30 @@
 	import { cubicInOut } from "svelte/easing";
 	import { app_two } from "$lib/three/app_two.js";
 	import { loading } from "$lib/loading.js";
+	import { wipeCss } from "$lib/animation.js";
 
 	let { data } = $props();
 
 	let canvas;
 	let app;
+
+	function wipeOut(node, { direction = 1, vertical = false } = {}) {
+		return {
+			duration: DURATION,
+			easing: cubicInOut,
+			// t runs 1 → 0, so the global sweep progress is 1 - t.
+			css: (t) => wipeCss(1 - t, direction, vertical, false),
+		};
+	}
+
+	function wipeIn(node, { direction = 1, vertical = false } = {}) {
+		return {
+			duration: DURATION,
+			easing: cubicInOut,
+			// t runs 0 → 1, matching the global sweep progress.
+			css: (t) => wipeCss(t, direction, vertical, true),
+		};
+	}
 
 	// True when the viewport is portrait (phone / vertical). Drives the swap to
 	// vertical navigation (swipe top↔bottom) and the vertical title wipe.
@@ -28,64 +47,20 @@
 	let prevIndex = data.index;
 	$effect(() => {
 		if (currentIndex !== prevIndex) {
-			direction = currentIndex > prevIndex ? 1 : -1;
+			direction = currentIndex > prevIndex ? -1 : 1;
 			prevIndex = currentIndex;
 		}
 	});
 
 	const DURATION = 800;
-	// Peak blur applied while a title is mid-transition.
-	const MAX_BLUR = 14;
-	// How far a title slides (% of the swept axis) as it enters/leaves.
-	const SHIFT = 12;
-	// Width of the soft trailing-edge feather (% of the swept axis).
-	const FEATHER = 35;
+	// Wipe geometry (FEATHER) lives in $lib/animation.js; blur amount + band
+	// width live in CSS (.title-blur / --band).
 
-	// Both titles transition at once and overlap: the outgoing one blurs, fades
-	// (opacity) and slides out while the incoming one blurs, fades and slides in
-	// from the opposite side — so for a moment you see both. A soft directional
-	// gradient mask feathers the leaving edge so the dissolve reads as a wipe.
-	// `t` is this title's own presence: 1 = fully here, 0 = fully gone.
-	// Landscape sweeps horizontally, portrait vertically, mirrored by `direction`.
-	function wipeCss(t, direction, vertical, reveal) {
-		const gone = 1 - t;
-		const blur = gone * MAX_BLUR;
-		// New enters from -direction, old exits toward +direction (one shared flow).
-		const offset = gone * SHIFT * direction * (reveal ? -1 : 1);
-		const translate = vertical
-			? `translateY(${offset}%)`
-			: `translateX(${offset}%)`;
-		const side = vertical
-			? direction === -1
-				? "to top"
-				: "to bottom"
-			: direction === 1
-				? "to left"
-				: "to right";
-		// Feather the trailing edge; grows as the title leaves, keeps it gradient-y
-		// without fully hiding (opacity carries most of the fade so both stay visible).
-		const fade = gone * FEATHER;
-		const mask = `linear-gradient(${side}, transparent 0%, black ${fade}%, black 100%)`;
-		return `opacity: ${t}; filter: blur(${blur}px); transform: ${translate}; -webkit-mask-image: ${mask}; mask-image: ${mask};`;
-	}
-
-	function wipeOut(node, { direction = 1, vertical = false } = {}) {
-		return {
-			duration: DURATION,
-			easing: cubicInOut,
-			// t runs 1 → 0 (present → gone).
-			css: (t) => wipeCss(t, direction, vertical, false),
-		};
-	}
-
-	function wipeIn(node, { direction = 1, vertical = false } = {}) {
-		return {
-			duration: DURATION,
-			easing: cubicInOut,
-			// t runs 0 → 1 (gone → present).
-			css: (t) => wipeCss(t, direction, vertical, true),
-		};
-	}
+	// Angle of the sweep, matching the `side` keyword below, so the wipe mask and
+	// the blurred-seam band (built in CSS from --edge/--ang) stay aligned.
+	const wipeAngle = $derived(
+		isPortrait ? (direction === -1 ? 180 : 0) : direction === 1 ? 90 : 270,
+	);
 
 	$effect(() => {
 		if (app && data.index !== currentIndex) {
@@ -213,12 +188,20 @@
 	{#key currentIndex}
 		<div
 			class="title-stack"
+			style:--ang="{wipeAngle}deg"
 			in:wipeIn={{ direction, vertical: isPortrait }}
 			out:wipeOut={{ direction, vertical: isPortrait }}
 		>
-			{#each heading as line}
-				<h1 class="title">{line}</h1>
-			{/each}
+			<div class="title-layer">
+				{#each heading as line}
+					<h1 class="title">{line}</h1>
+				{/each}
+			</div>
+			<div class="title-layer title-blur" aria-hidden="true">
+				{#each heading as line}
+					<h1 class="title">{line}</h1>
+				{/each}
+			</div>
 		</div>
 	{/key}
 </div>
@@ -244,14 +227,50 @@
 		text-align: center;
 	}
 
+	/* Drives the blurred seam; registered so it interpolates smoothly while the
+	   wipe animates it. Off-screen (-100) at rest so no blur shows when idle. */
+	@property --edge {
+		syntax: "<number>";
+		inherits: true;
+		initial-value: -100;
+	}
+
 	/* Stacked so the outgoing and incoming titles overlap during the wipe. */
 	.title-stack {
+		position: absolute;
+		inset: 0;
+		--edge: -100;
+		/* Half-width of the blurred band (% of the swept axis). */
+		--band: 16;
+		will-change: mask-image;
+	}
+
+	/* Sharp text + blurred duplicate occupy the same box, stacked. */
+	.title-layer {
 		position: absolute;
 		inset: 0;
 		display: flex;
 		flex-direction: column;
 		justify-content: space-between;
 		align-items: center;
-		will-change: clip-path;
+	}
+
+	/* Blurred copy, revealed only inside a gradient band riding the wipe edge,
+	   so the blur is a linear gradient along the sweep direction — not the whole
+	   word. The band fades to transparent on both sides of --edge. */
+	.title-blur {
+		filter: blur(14px);
+		-webkit-mask-image: linear-gradient(
+			var(--ang, 90deg),
+			transparent calc((var(--edge) - var(--band)) * 1%),
+			#000 calc(var(--edge) * 1%),
+			transparent calc((var(--edge) + var(--band)) * 1%)
+		);
+		mask-image: linear-gradient(
+			var(--ang, 90deg),
+			transparent calc((var(--edge) - var(--band)) * 1%),
+			#000 calc(var(--edge) * 1%),
+			transparent calc((var(--edge) + var(--band)) * 1%)
+		);
 	}
 </style>

@@ -1,6 +1,7 @@
 <script>
 	import "../app.css";
 	import { loading } from "$lib/loading.js";
+	import Navigation from "../lib/Navigation.svelte";
 
 	let { children } = $props();
 </script>
@@ -11,6 +12,9 @@
 	</div>
 {/if}
 
+<div class="layout-container">
+	<Navigation />
+</div>
 {@render children()}
 
 <style>
