@@ -45,6 +45,9 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 	let generation = 0;
 	const carousel = { center: startIndex % Math.max(sources.length, 1) };
 	const reveal = { active: false, t: 0, dir: 1 };
+	// Navigation axis: 0 = horizontal (landscape, left/right), 1 = vertical
+	// (portrait, top/bottom). Set from the component via setOrientation.
+	let axis = 0;
 	// Hover peek fade: ramps 0 -> 1 after a reveal so the peek eases back in.
 	const hoverFade = { t: 1 };
 	// Peek-slot crossfade: ramps 0 -> 1 so A/C texture swaps blend, not cut.
@@ -103,6 +106,7 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 				uReveal: { value: 0 },
 				uRevealDir: { value: 1 },
 				uHoverFade: { value: 1 },
+				uAxis: { value: axis },
 				// Peek-slot crossfade: prev source + size, and the 0->1 mix.
 				uTextureAPrev: { value: center },
 				uTextureCPrev: { value: center },
@@ -216,15 +220,34 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 				mouse.targetY = 1 - event.ev.clientY / window.innerHeight;
 				break;
 			case "click":
-				// Advance toward the side that was clicked → prev / next artist.
-				if (!reveal.active && textures.length > 1) {
-					reveal.active = true;
-					reveal.t = 0;
-					reveal.dir = mouse.x < 0.5 ? -1 : 1;
-					material.uniforms.uRevealDir.value = reveal.dir;
-				}
+				// Advance toward the side/half that was clicked → prev / next artist.
+				// Horizontal: left = prev. Vertical: top = prev (mouse.y is y-up).
+				navigate(axis === 1 ? (mouse.y > 0.5 ? -1 : 1) : (mouse.x < 0.5 ? -1 : 1));
 				break;
 		}
+	}
+
+	// Start a reveal toward `dir` (-1 prev, +1 next). Optionally snap the reveal
+	// origin (normalised, y up) to a point so a swipe's circle grows from the
+	// finger rather than the last smoothed pointer position. Ignored mid-reveal.
+	function navigate(dir, origin) {
+		if (!material || reveal.active || textures.length <= 1) return;
+		if (origin) {
+			mouse.x = mouse.targetX = origin.x;
+			mouse.y = mouse.targetY = origin.y;
+			material.uniforms.uMouse.value.set(mouse.x, mouse.y);
+		}
+		reveal.active = true;
+		reveal.t = 0;
+		reveal.dir = dir;
+		material.uniforms.uRevealDir.value = dir;
+	}
+
+	// Switch the navigation axis: portrait swipes top↔bottom, landscape goes
+	// left↔right. Stores the flag even before init builds the material.
+	function setOrientation(isPortrait) {
+		axis = isPortrait ? 1 : 0;
+		if (material) material.uniforms.uAxis.value = axis;
 	}
 
 	// Snap the centre to a given artist index without animation. Used to keep
@@ -306,6 +329,8 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 		init,
 		draw,
 		onEventHandler,
+		navigate,
+		setOrientation,
 		jumpTo,
 		setImages,
 		dispose,

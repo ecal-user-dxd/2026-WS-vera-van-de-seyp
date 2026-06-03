@@ -21,6 +21,7 @@ export const fragmentShader = /* glsl */ `
 	uniform float uRevealDir; // -1 -> previous (A), +1 -> next (C)
 	uniform float uHoverFade; // 0 -> hidden, 1 -> hover peek fully active
 	uniform float uPeekMix;   // 0 -> previous A/C source, 1 -> new A/C source
+	uniform float uAxis;      // 0 -> horizontal (left/right), 1 -> vertical (top/bottom)
 
 	// "cover" mapping: fill the screen, preserve the image aspect ratio.
 	vec2 coverUv(vec2 uv, vec2 imageSize) {
@@ -50,13 +51,19 @@ export const fragmentShader = /* glsl */ `
 		vec2 m = vec2(uMouse.x * aspect, uMouse.y);    // aspect-corrected mouse
 		float d = distance(p, m);
 
-		// 0 inside the 0.3 - 0.7 band, ramps to 1 past the left/right thresholds.
-		float edge = max(smoothstep(0.3, 0.0, uMouse.x), smoothstep(0.7, 1.0, uMouse.x));
+		// Pointer position along the active axis: x when horizontal, y when vertical.
+		float coord = uAxis < 0.5 ? uMouse.x : uMouse.y;
+		// 0 inside the 0.3 - 0.7 band, ramps to 1 past the edge thresholds.
+		float edge = max(smoothstep(0.3, 0.0, coord), smoothstep(0.7, 1.0, coord));
 		float feather = 0.05;
 
-		// Which neighbour we're showing. Locked by the click direction while a
-		// reveal is playing, otherwise chosen by the side the mouse is on.
-		float dir = uReveal > 0.0 ? uRevealDir : (uMouse.x < 0.5 ? -1.0 : 1.0);
+		// Which neighbour we're showing. Locked by the click/swipe direction while a
+		// reveal is playing, otherwise chosen by the side/half the pointer is on.
+		// Horizontal: left = prev. Vertical: top = prev (note uMouse.y is y-up).
+		float side = uAxis < 0.5
+			? (uMouse.x < 0.5 ? -1.0 : 1.0)
+			: (uMouse.y > 0.5 ? -1.0 : 1.0);
+		float dir = uReveal > 0.0 ? uRevealDir : side;
 		vec4 spot = dir < 0.0 ? a : c;
 		// Hover peek: a small circle that only appears past the side thresholds.
 		// uHoverFade eases it back in after a reveal so it doesn't pop in abruptly.

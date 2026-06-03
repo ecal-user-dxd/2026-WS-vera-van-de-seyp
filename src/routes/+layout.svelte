@@ -6,7 +6,6 @@
 </script>
 
 {#if $loading}
-	<!-- Covers the screen until the carousel's centre + neighbour videos load. -->
 	<div class="loader" role="status" aria-label="Loading">
 		<span class="spinner"></span>
 	</div>
