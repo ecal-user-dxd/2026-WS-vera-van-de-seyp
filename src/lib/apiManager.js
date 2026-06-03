@@ -18,8 +18,23 @@ export async function getArtists() {
 		query: "page('workshop-vera').children.listed",
 		select: ARTIST_FIELDS,
 	});
+
+	const infos = await kql({
+		query: "page('workshop-vera').content",
+		select: {
+			title: true,
+			description: true,
+			favicon: true,
+			seo_title: true,
+			seo_description: true,
+		},
+	});
+
+	console.log("infos", infos);
+
 	return (list ?? []).map((artist) => ({
 		...artist,
+		inofo: infos,
 		slug: slugFromUrl(artist.url),
 	}));
 }

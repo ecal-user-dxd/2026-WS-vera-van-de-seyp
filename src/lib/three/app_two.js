@@ -20,14 +20,19 @@ import { fragmentShader } from "./shader/fragment.js";
 import { applyCarousel, loadTexture, textureSize } from "./texturesManager.js";
 import { PARAMS } from "../PARAMS.js";
 
-export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = {}) => {
+export const app_two = ({
+	canvas,
+	images,
+	startIndex = 0,
+	onChange,
+	onReady,
+} = {}) => {
 	// Normalise an images array into renderable sources: empty list → one
 	// fallback, and any missing entry → a random fallback image.
 	const normalizeSources = (imgs) =>
 		(imgs && imgs.length ? imgs : [null]).map((src) => src || randomFallback());
 
 	let sources = normalizeSources(images);
-
 
 	const clock = new THREE.Clock();
 	let elapsed = 0; // accumulated seconds, fed to uTime
@@ -37,34 +42,43 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 		targetX: 0.5,
 		targetY: 0.5,
 	};
+	// Touch drag: clip-space offset that slides the quad under the finger. Eased
+	// from current -> target like the pointer; target resets to 0 on touch end.
+	const drag = {
+		x: 0,
+		y: 0,
+		targetX: 0,
+		targetY: 0,
+	};
 
 	let renderer;
 	let scene;
 	let camera;
 	let material;
 	let textures = [];
-	// Distinct loaded textures, so dispose() frees each once even while several
-	// `textures` slots still point at a placeholder during background loading.
+	let raf; // requestAnimationFrame handle for the render loop
+
 	const loaded = new Set();
-	// Bumped whenever the source set changes (setImages). In-flight loads check
-	// it and bail if a newer load has superseded them.
+
 	let generation = 0;
 	const carousel = { center: startIndex % Math.max(sources.length, 1) };
 	const reveal = { active: false, t: 0, dir: 1 };
-	// Navigation axis: 0 = horizontal (landscape, left/right), 1 = vertical
-	// (portrait, top/bottom). Set from the component via setOrientation.
 	let axis = 0;
-	// Touch devices have no hover, so the vertex bend is pulsed once per
-	// transition instead of following the pointer. Set via setTouch.
+
 	let touchMode = false;
+	let quad;
 	// Hover peek fade: ramps 0 -> 1 after a reveal so the peek eases back in.
 	const hoverFade = { t: 1 };
 	// Peek-slot crossfade: ramps 0 -> 1 so A/C texture swaps blend, not cut.
 	const peekMix = { t: 1 };
 
 	// Time-based transition parameters (seconds), independent of refresh rate.
-	const { REVEAL_DURATION, HOVER_FADE_DURATION, PEEK_FADE_DURATION, MOUSE_SMOOTH } =
-		PARAMS;
+	const {
+		REVEAL_DURATION,
+		HOVER_FADE_DURATION,
+		PEEK_FADE_DURATION,
+		MOUSE_SMOOTH,
+	} = PARAMS;
 
 	async function init() {
 		renderer = new THREE.WebGLRenderer({
@@ -117,6 +131,8 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 				uHoverFade: { value: 1 },
 				uAxis: { value: axis },
 				uBend: { value: 0 },
+				uRotation: { value: 0 },
+				uDrag: { value: new THREE.Vector2(0, 0) },
 				// Peek-slot crossfade: prev source + size, and the 0->1 mix.
 				uTextureAPrev: { value: center },
 				uTextureCPrev: { value: center },
@@ -126,10 +142,7 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 			},
 		});
 		applyCarousel(material, textures, carousel.center);
-		const quad = new THREE.Mesh(
-			new THREE.PlaneGeometry(2, 2, 64, 64),
-			material,
-		);
+		quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2, 64, 64), material);
 		quad.frustumCulled = false;
 		scene.add(quad);
 		resize(window.innerWidth, window.innerHeight);
@@ -178,25 +191,22 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 		mouse.x = lerp(mouse.x, mouse.targetX, smooth);
 		mouse.y = lerp(mouse.y, mouse.targetY, smooth);
 		material.uniforms.uMouse.value.set(mouse.x, mouse.y);
+		// Same easing for the touch drag, so the quad follows the finger and
+		// springs back to centre when the target is reset to 0 on release.
+		drag.x = lerp(drag.x, drag.targetX, smooth);
+		drag.y = lerp(drag.y, drag.targetY, smooth);
+		material.uniforms.uDrag.value.set(drag.x, drag.y);
 		material.uniforms.uTime.value = elapsed;
-
-		// Vertex bend. On touch there's no hover, so it pulses once per transition
-		// (0 at the start, peaks mid-reveal, back to 0 at the end). On pointer
-		// devices it tracks the cursor's distance to the edges along the active
-		// axis, bulging as it nears them — the same hover bulge as before.
 		let bend;
 		if (touchMode) {
-			// No hover on touch, so keep the bulge always on.
 			bend = 1;
 		} else {
-			// Bulge as the cursor nears any edge, on both axes (all directions),
-			// ramping in from 0.4 / 0.6 toward the screen edges.
 			const edgeBend = (coord) =>
 				Math.max(smoothstep(0.4, 0.0, coord), smoothstep(0.6, 1.0, coord));
 			bend = Math.max(edgeBend(mouse.x), edgeBend(mouse.y));
+			bend = bend <= 0.2 ? 0.2 : bend;
 		}
 		material.uniforms.uBend.value = bend;
-
 		// Ease the hover peek back in after a reveal so it doesn't pop in abruptly.
 		hoverFade.t = Math.min(hoverFade.t + delta / HOVER_FADE_DURATION, 1.0);
 		material.uniforms.uHoverFade.value = hoverFade.t;
@@ -234,7 +244,21 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 			}
 		}
 
+		// Spin the quad continuously (radians). Time-based, so the speed stays the
+		// same at any refresh rate. The shader bypasses modelMatrix, so this drives
+		// uRotation rather than quad.rotation.
+
 		renderer.render(scene, camera);
+	}
+
+	// Drive the render loop. Kept inside the instance so the caller doesn't own
+	// the requestAnimationFrame handle — dispose() stops it.
+	function start() {
+		const tick = () => {
+			draw();
+			raf = requestAnimationFrame(tick);
+		};
+		tick();
 	}
 
 	function onEventHandler(type, event) {
@@ -246,17 +270,22 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 				mouse.targetX = event.ev.clientX / window.innerWidth;
 				mouse.targetY = 1 - event.ev.clientY / window.innerHeight;
 				break;
+			case "drag":
+				// Clip-space offset (already axis-resolved by controls). On touch end
+				// controls sends {0,0}, so the quad eases back to centre.
+				drag.targetX = event.x;
+				drag.targetY = event.y;
+				break;
 			case "click":
 				// Advance toward the side/half that was clicked → prev / next artist.
 				// Horizontal: left = prev. Vertical: top = prev (mouse.y is y-up).
-				navigate(axis === 1 ? (mouse.y > 0.5 ? -1 : 1) : (mouse.x < 0.5 ? -1 : 1));
+				navigate(
+					axis === 1 ? (mouse.y > 0.5 ? -1 : 1) : mouse.x < 0.5 ? -1 : 1,
+				);
 				break;
 		}
 	}
 
-	// Start a reveal toward `dir` (-1 prev, +1 next). Optionally snap the reveal
-	// origin (normalised, y up) to a point so a swipe's circle grows from the
-	// finger rather than the last smoothed pointer position. Ignored mid-reveal.
 	function navigate(dir, origin) {
 		if (!material || reveal.active || textures.length <= 1) return;
 		if (origin) {
@@ -347,6 +376,7 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 
 	// Free GPU resources when the component using this instance unmounts.
 	function dispose() {
+		cancelAnimationFrame(raf);
 		if (renderer) {
 			renderer.dispose();
 			renderer.forceContextLoss?.();
@@ -360,7 +390,7 @@ export const app_two = ({ canvas, images, startIndex = 0, onChange, onReady } = 
 
 	return {
 		init,
-		draw,
+		start,
 		onEventHandler,
 		navigate,
 		setOrientation,

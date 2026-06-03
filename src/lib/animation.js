@@ -1,15 +1,11 @@
-// Half-width of the soft wipe edge (% of the swept axis). Small, so there is a
-// clear sweeping edge (a real wipe) with just a soft seam where the old and new
-// words briefly meet. The blurred seam itself is built in CSS from --edge.
-const FEATHER = 0.1;
+import { cubicInOut } from "svelte/easing";
 
-// A single soft edge sweeps the whole axis, shared by both titles so their edges
-// stay aligned: ahead of it the old word shows, behind it the new one. The blur
-// is NOT applied to the whole word — this exposes the edge position as --edge,
-// and a blurred duplicate layer is masked to a gradient band riding that edge
-// (see .title-blur), so only the moving seam is blurry.
-// `progress` is the global 0 → 1 sweep; `reveal` is the incoming word.
-// Landscape sweeps horizontally, portrait vertically, mirrored by `direction`.
+// Duration of a title wipe, in ms. Shared by the in/out transitions so the old
+// and new word sweep in lockstep.
+const DURATION = 10000;
+
+const FEATHER = 0.3;
+
 export function wipeCss(progress, direction, vertical, reveal) {
 	const edge = -FEATHER + progress * (100 + 2 * FEATHER);
 	const side = vertical
@@ -25,3 +21,56 @@ export function wipeCss(progress, direction, vertical, reveal) {
 	const mask = `linear-gradient(${side}, ${stops})`;
 	return `--edge: ${edge}; -webkit-mask-image: ${mask}; mask-image: ${mask};`;
 }
+
+// Outgoing word: t runs 1 → 0, so the global sweep progress is 1 - t.
+export function wipeOut(node, { direction = 1, vertical = false } = {}) {
+	return {
+		duration: DURATION,
+		easing: cubicInOut,
+		css: (t) => wipeCss(1 - t, direction, vertical, false),
+	};
+}
+
+// Incoming word: t runs 0 → 1, matching the global sweep progress.
+export function wipeIn(node, { direction = 1, vertical = false } = {}) {
+	return {
+		duration: DURATION,
+		easing: cubicInOut,
+		css: (t) => wipeCss(t, direction, vertical, true),
+	};
+}
+
+// Wipe-related styles, injected globally by the title component. The blur
+// amount lives in `.title-blur`; the band width is `--band` on `.title-stack`.
+// `--edge` is exposed by wipeCss() each frame and rides the blurred seam.
+export const wipeStyles = `
+	@property --edge {
+		syntax: "<number>";
+		inherits: true;
+		initial-value: -100;
+	}
+
+	.title-stack {
+		position: absolute;
+		inset: 0;
+		--edge: -100;
+		--band: 16;
+		will-change: mask-image;
+	}
+
+	.title-blur {
+		filter: blur(14px);
+		-webkit-mask-image: linear-gradient(
+			var(--ang, 90deg),
+			transparent calc((var(--edge) - var(--band)) * 1%),
+			#000 calc(var(--edge) * 1%),
+			transparent calc((var(--edge) + var(--band)) * 1%)
+		);
+		mask-image: linear-gradient(
+			var(--ang, 90deg),
+			transparent calc((var(--edge) - var(--band)) * 1%),
+			#000 calc(var(--edge) * 1%),
+			transparent calc((var(--edge) + var(--band)) * 1%)
+		);
+	}
+`;
