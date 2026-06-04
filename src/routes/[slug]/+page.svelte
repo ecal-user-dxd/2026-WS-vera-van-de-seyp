@@ -1,16 +1,45 @@
 <script>
 	import { onMount } from "svelte";
 	import { fade } from "svelte/transition";
-	import { goto } from "$app/navigation";
+	import { goto, beforeNavigate } from "$app/navigation";
 	import { app_two } from "$lib/three/app_two.js";
 	import { attachControls } from "$lib/three/controls.js";
 	import { loading } from "$lib/loading.js";
 	import { wipeIn, wipeOut, wipeStyles } from "$lib/animation.js";
+	import ProjectInfo from "$lib/ProjectInfo.svelte";
 
 	let { data } = $props();
 
 	let canvas;
 	let app;
+
+	// Cursor-following info label (mouse devices only). x is normalised 0..1
+	// across the width; px/py are the raw cursor coordinates it anchors to.
+	let isTouch = $state(false);
+	let pointer = $state({ x: 0.5, px: 0, py: 0 });
+	const onPointerMove = (ev) => {
+		pointer = { x: ev.clientX / window.innerWidth, px: ev.clientX, py: ev.clientY };
+	};
+
+	// Cursor matches the info label's zones on mouse devices: a directional
+	// resize cursor over prev/next, a pointer (hand) over the website zone.
+	const cursor = $derived(
+		isTouch
+			? "auto"
+			: pointer.x < 0.4
+				? "w-resize"
+				: pointer.x > 0.6
+					? "e-resize"
+					: "pointer",
+	);
+
+	// While the carousel canvas fades out (out:fade) on the way to another route,
+	// the instance is still mounted and running. Block its onChange goto so a
+	// reveal finishing mid-fade can't bounce us back to the last artist.
+	let leaving = false;
+	beforeNavigate((nav) => {
+		if (nav.to?.route?.id !== nav.from?.route?.id) leaving = true;
+	});
 
 	// True when the viewport is portrait (phone / vertical). Drives the swap to
 	// vertical navigation (swipe top↔bottom) and the vertical title wipe.
@@ -63,6 +92,7 @@
 			images: sourcesForViewport(),
 			startIndex: data.index,
 			onChange: (index) => {
+				if (leaving) return;
 				currentIndex = index;
 				goto(`/${data.artists[index].slug}`, {
 					noScroll: true,
@@ -76,7 +106,8 @@
 		// Touch only when the primary pointer is coarse (phones/tablets). Desktop
 		// browsers expose "ontouchstart" too, so that check alone would wrongly
 		// flag a mouse as touch and trigger the carousel slide on desktop.
-		app.setTouch(window.matchMedia?.("(pointer: coarse)").matches ?? false);
+		isTouch = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+		app.setTouch(isTouch);
 
 		const detachControls = attachControls({
 			app,
@@ -122,7 +153,21 @@
 	{/key}
 </div>
 
-<canvas bind:this={canvas} id="canvas" out:fade={{ duration: 400 }}></canvas>
+<canvas
+	bind:this={canvas}
+	id="canvas"
+	style:cursor
+	out:fade={{ duration: 400 }}
+></canvas>
+
+<svelte:window onmousemove={onPointerMove} />
+
+<ProjectInfo
+	x={pointer.x}
+	px={pointer.px}
+	py={pointer.py}
+	visible={!isTouch}
+/>
 
 <style>
 	#canvas {

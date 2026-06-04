@@ -1,3 +1,8 @@
+@font-face {
+	font-family: "MONO";
+	src: url("$lib/assets/ecal-mono.woff2") format("woff2");
+}
+
 *,
 body,
 html {

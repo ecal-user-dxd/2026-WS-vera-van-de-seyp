@@ -1,10 +1,22 @@
 <script>
+	import { derived } from "svelte/store";
+	import { page } from "$app/stores";
+	const route = $page.url.pathname;
+	console.log("Current route:", route);
 </script>
 
 <div class="navigation-container">
 	<nav>
-		<a href="/index">Index</a>
-		<a href="/informations">Informations</a>
+		{#if route === "/projects"}
+			<a href="/">Back</a>
+			<a href="/informations">Informations</a>
+		{:else if route === "/informations"}
+			<a href="/projects">Index</a>
+			<a href="/">Back</a>
+		{:else}
+			<a href="/projects">Index</a>
+			<a href="/informations">Informations</a>
+		{/if}
 	</nav>
 </div>
 
@@ -23,8 +35,9 @@
 		justify-content: space-between;
 	}
 	a {
+		font-family: "MONO", monospace;
 		text-decoration: none;
-		color: white;
+		color: black;
 		filter: difference(1) drop-shadow(0 0 0.5px black);
 	}
 </style>

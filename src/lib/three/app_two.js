@@ -290,11 +290,16 @@ export const app_two = ({
 				drag.targetY = event.y;
 				break;
 			case "click":
-				// Advance toward the side/half that was clicked → prev / next artist.
-				// Horizontal: left = prev. Vertical: top = prev (mouse.y is y-up).
-				navigate(
-					axis === 1 ? (mouse.y > 0.5 ? -1 : 1) : mouse.x < 0.5 ? -1 : 1,
-				);
+				// Vertical (portrait): top = prev, bottom = next (mouse.y is y-up).
+				if (axis === 1) {
+					navigate(mouse.y > 0.5 ? -1 : 1);
+				} else {
+					// Horizontal: three zones matching the cursor info label —
+					// left 0..0.4 = prev, right 0.6..1 = next, middle = website
+					// (label only for now, so a click there does nothing).
+					if (mouse.x < 0.4) navigate(-1);
+					else if (mouse.x > 0.6) navigate(1);
+				}
 				break;
 		}
 	}
