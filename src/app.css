@@ -32,3 +32,9 @@ h1 {
 	padding: 0.5rem;
 	color: black;
 }
+
+@media (max-width: 600px) {
+	h1 {
+		font-size: 3.5rem;
+	}
+}

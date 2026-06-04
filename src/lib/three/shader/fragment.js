@@ -53,9 +53,13 @@ export const fragmentShader = /* glsl */ `
 			vec4 nei = uSlideDir < 0.0
 				? texture2D(uTextureA, coverUv(neiUv, uSizeA))
 				: texture2D(uTextureC, coverUv(neiUv, uSizeC));
-			// Hard cut at the screen edge: once the centre has left [0,1], show the
-			// neighbour that has taken that part of the screen.
-			gl_FragColor = (curC < 0.0 || curC > 1.0) ? nei : cur;
+			// Soft feathered edge — the same halo softness as the desktop reveal,
+			// applied to the straight slide boundary instead of a hard cut. "over"
+			// grows positive as the centre image leaves its [0,1] screen band.
+			float slideFeather = 0.05;
+			float over = sgn < 0.0 ? (curC - 1.0) : -curC;
+			float edge = smoothstep(-slideFeather, slideFeather, over);
+			gl_FragColor = mix(cur, nei, edge);
 			return;
 		}
 

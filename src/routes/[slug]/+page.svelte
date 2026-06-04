@@ -72,10 +72,10 @@
 		});
 		app.init();
 		app.setOrientation(isPortrait);
-		app.setTouch(
-			window.matchMedia?.("(pointer: coarse)").matches ||
-				"ontouchstart" in window,
-		);
+		// Touch only when the primary pointer is coarse (phones/tablets). Desktop
+		// browsers expose "ontouchstart" too, so that check alone would wrongly
+		// flag a mouse as touch and trigger the carousel slide on desktop.
+		app.setTouch(window.matchMedia?.("(pointer: coarse)").matches ?? false);
 
 		const detachControls = attachControls({
 			app,
