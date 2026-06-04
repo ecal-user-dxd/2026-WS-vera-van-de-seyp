@@ -1,5 +1,6 @@
 <script>
 	import { onMount } from "svelte";
+	import { fade } from "svelte/transition";
 	import { goto } from "$app/navigation";
 	import { app_two } from "$lib/three/app_two.js";
 	import { attachControls } from "$lib/three/controls.js";
@@ -121,7 +122,7 @@
 	{/key}
 </div>
 
-<canvas bind:this={canvas} id="canvas"></canvas>
+<canvas bind:this={canvas} id="canvas" out:fade={{ duration: 400 }}></canvas>
 
 <style>
 	#canvas {

@@ -30,7 +30,13 @@ export function attachControls({
 		}
 	};
 	const onMouseMove = (ev) => app.onEventHandler("mousemove", { ev });
-	const onClick = (ev) => app.onEventHandler("click", { ev });
+	// Clicks/taps on overlay UI (the navigation) must not also drive the carousel,
+	// so following a nav link doesn't change the artist underneath.
+	const onOverlay = (ev) => !!ev.target?.closest?.("nav");
+	const onClick = (ev) => {
+		if (onOverlay(ev)) return;
+		app.onEventHandler("click", { ev });
+	};
 
 	// Touch: drag the reveal origin under the finger, then on release decide
 	// between a swipe (navigate by direction) and a tap (navigate by half).
@@ -57,6 +63,10 @@ export function attachControls({
 		});
 	};
 	const onTouchEnd = (ev) => {
+		if (onOverlay(ev)) {
+			app.onEventHandler("drag", { x: 0, y: 0 });
+			return;
+		}
 		const t = ev.changedTouches[0];
 		const dx = t.clientX - touchStartX;
 		const dy = t.clientY - touchStartY;

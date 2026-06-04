@@ -38,3 +38,19 @@ export async function getArtists() {
 		slug: slugFromUrl(artist.url),
 	}));
 }
+
+// The workshop's own content (title + description). Used by the /informations
+// page, which renders the description text into a WebGL texture.
+export async function getInfos() {
+	const infos = await kql({
+		query: "page('workshop-vera').content",
+		select: {
+			title: true,
+			description: true,
+			seo_title: true,
+			seo_description: true,
+		},
+	});
+
+	return infos ?? {};
+}
