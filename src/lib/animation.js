@@ -2,7 +2,7 @@ import { cubicInOut } from "svelte/easing";
 
 // Duration of a title wipe, in ms. Shared by the in/out transitions so the old
 // and new word sweep in lockstep.
-const DURATION = 10000;
+const DURATION = 100;
 
 const FEATHER = 0.3;
 

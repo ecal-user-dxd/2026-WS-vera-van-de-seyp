@@ -133,6 +133,9 @@ export const app_two = ({
 				uBend: { value: 0 },
 				uRotation: { value: 0 },
 				uDrag: { value: new THREE.Vector2(0, 0) },
+				// Touch carousel slide: progress (0->1) and direction (-1 prev / +1 next).
+				uSlide: { value: 0 },
+				uSlideDir: { value: 1 },
 				// Peek-slot crossfade: prev source + size, and the 0->1 mix.
 				uTextureAPrev: { value: center },
 				uTextureCPrev: { value: center },
@@ -216,13 +219,22 @@ export const app_two = ({
 		material.uniforms.uPeekMix.value = peekMix.t;
 
 		if (reveal.active) {
-			// Radius that fully covers the screen from any click point (+feather).
-			const res = material.uniforms.uResolution.value;
-			const coverRadius = Math.hypot(res.x / res.y, 1.0) + 0.06;
-
-			// Advance by elapsed time, so the reveal always takes REVEAL_DURATION.
+			// Advance by elapsed time, so the transition always takes REVEAL_DURATION.
 			reveal.t = Math.min(reveal.t + delta / REVEAL_DURATION, 1.0);
-			material.uniforms.uReveal.value = reveal.t * coverRadius;
+
+			if (touchMode) {
+				// Touch: slide the whole screen across like a carousel — the centre
+				// image exits one edge while the neighbour enters from the opposite one.
+				material.uniforms.uSlide.value = reveal.t;
+				material.uniforms.uSlideDir.value = reveal.dir;
+				material.uniforms.uReveal.value = 0;
+			} else {
+				// Desktop: grow the radial reveal circle from the click point.
+				// Radius that fully covers the screen from any click point (+feather).
+				const res = material.uniforms.uResolution.value;
+				const coverRadius = Math.hypot(res.x / res.y, 1.0) + 0.06;
+				material.uniforms.uReveal.value = reveal.t * coverRadius;
+			}
 
 			// At t === 1 the neighbour fully covers the screen, so swapping it in as
 			// the new centre and collapsing is pixel-identical — no flash, no drop.
@@ -235,6 +247,7 @@ export const app_two = ({
 				reveal.active = false;
 				reveal.t = 0;
 				material.uniforms.uReveal.value = 0;
+				material.uniforms.uSlide.value = 0;
 				// Restart the hover peek + crossfade so A/C ease in from old -> new.
 				hoverFade.t = 0;
 				material.uniforms.uHoverFade.value = 0;
@@ -324,6 +337,7 @@ export const app_two = ({
 		reveal.active = false;
 		reveal.t = 0;
 		material.uniforms.uReveal.value = 0;
+		material.uniforms.uSlide.value = 0;
 		applyCarousel(material, textures, carousel.center);
 		// Snap is instant: settle the crossfade so peeks show the new source.
 		peekMix.t = 1;
@@ -359,6 +373,7 @@ export const app_two = ({
 		reveal.active = false;
 		reveal.t = 0;
 		material.uniforms.uReveal.value = 0;
+		material.uniforms.uSlide.value = 0;
 		applyCarousel(material, textures, carousel.center);
 		// Point the crossfade "prev" slots at the new sources too, so nothing
 		// keeps referencing the old textures we're about to dispose, then settle

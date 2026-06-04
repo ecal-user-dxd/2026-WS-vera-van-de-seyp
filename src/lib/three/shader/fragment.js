@@ -22,6 +22,8 @@ export const fragmentShader = /* glsl */ `
 	uniform float uHoverFade; // 0 -> hidden, 1 -> hover peek fully active
 	uniform float uPeekMix;   // 0 -> previous A/C source, 1 -> new A/C source
 	uniform float uAxis;      // 0 -> horizontal (left/right), 1 -> vertical (top/bottom)
+	uniform float uSlide;     // touch carousel: 0 -> centre, 1 -> neighbour slid fully in
+	uniform float uSlideDir;  // -1 -> previous (A), +1 -> next (C)
 
 	// "cover" mapping: fill the screen, preserve the image aspect ratio.
 	vec2 coverUv(vec2 uv, vec2 imageSize) {
@@ -33,6 +35,30 @@ export const fragmentShader = /* glsl */ `
 	}
 
 	void main() {
+		// Touch carousel: the centre image slides fully off one edge while the
+		// neighbour enters from the opposite edge, the whole screen moving as a
+		// strip. Driven by uSlide (0..1); bypasses the desktop hover/reveal path.
+		if (uSlide > 0.0) {
+			// Axis coordinate that moves under the swipe (x landscape, y portrait).
+			float c = uAxis < 0.5 ? vUv.x : vUv.y;
+			// Content displacement direction per axis: navigate(+1)=next slides the
+			// image left in landscape (-x) but up in portrait (+y), so the sign flips.
+			float sgn = uAxis < 0.5 ? -uSlideDir : uSlideDir;
+			float curC = c - sgn * uSlide; // where the centre image is sampled
+			float neiC = curC + sgn;       // neighbour, one screen toward the entry edge
+			vec2 curUv = uAxis < 0.5 ? vec2(curC, vUv.y) : vec2(vUv.x, curC);
+			vec2 neiUv = uAxis < 0.5 ? vec2(neiC, vUv.y) : vec2(vUv.x, neiC);
+			vec4 cur = texture2D(uTextureB, coverUv(curUv, uSizeB));
+			// Next slides in C (right/below), previous slides in A (left/above).
+			vec4 nei = uSlideDir < 0.0
+				? texture2D(uTextureA, coverUv(neiUv, uSizeA))
+				: texture2D(uTextureC, coverUv(neiUv, uSizeC));
+			// Hard cut at the screen edge: once the centre has left [0,1], show the
+			// neighbour that has taken that part of the screen.
+			gl_FragColor = (curC < 0.0 || curC > 1.0) ? nei : cur;
+			return;
+		}
+
 		// Peek slots crossfade from their previous source to the new one after a
 		// carousel step, so swapping A/C textures eases in instead of cutting.
 		vec4 a = mix(
