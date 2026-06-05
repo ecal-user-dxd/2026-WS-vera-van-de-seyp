@@ -67,12 +67,9 @@ export const app_two = ({
 	let generation = 0;
 	const carousel = { center: startIndex % Math.max(sources.length, 1) };
 	const reveal = { active: false, t: 0, dir: 1 };
-	// Set while an autoplay-driven reveal is running so the vertex bend eases up to
-	// 1 (like touch) instead of tracking the idle cursor. Cleared on completion.
+	// Set while an autoplay-driven reveal is running. Kept so the render-on-demand
+	// loop stays awake for the whole autoplay transition. Cleared on completion.
 	let autoReveal = false;
-	// Eased bend value for autoplay: ramps 0 -> 1 so the bend transitions in rather
-	// than snapping, then holds at 1 for the rest of the reveal.
-	const autoBend = { t: 0 };
 	let axis = 0;
 
 	let touchMode = false;

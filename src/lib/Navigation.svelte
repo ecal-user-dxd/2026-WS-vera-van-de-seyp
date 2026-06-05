@@ -36,6 +36,12 @@
 		z-index: 20;
 	}
 
+	@media (orientation: portrait) {
+		.navigation-container {
+			display: none;
+		}
+	}
+
 	nav {
 		display: flex;
 		justify-content: space-between;
