@@ -1,12 +1,6 @@
 import * as THREE from "three";
 import { lerp } from "./utils.js";
 
-// GLSL-style smoothstep: 0 below e0, 1 above e1, eased Hermite in between.
-const smoothstep = (e0, e1, x) => {
-	const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1);
-	return t * t * (3 - 2 * t);
-};
-
 // Bundled fallbacks: any artist with no thumbnail in the CMS gets a random
 // one of these instead.
 import fallbackA from "../assets/CleanShot 2026-06-01 at 15.44.25@2x.png";
@@ -58,6 +52,15 @@ export const app_two = ({
 	let material;
 	let textures = [];
 	let raf; // requestAnimationFrame handle for the render loop
+	// Render-on-demand: the scene is static unless something is easing (pointer,
+	// drag, reveal, crossfade). We skip renderer.render() on idle frames so the
+	// GPU isn't re-running the full-screen shader 60-120x/s for an identical
+	// image. `dirty` forces a one-off render after a state change (resize, image
+	// swap, jump) that isn't covered by the easing checks below.
+	let dirty = true;
+	// Below this, an eased value is treated as settled (sub-pixel in 0..1 space),
+	// so we can snap it to target and stop rendering.
+	const SETTLE_EPS = 0.0005;
 
 	const loaded = new Set();
 
@@ -152,7 +155,7 @@ export const app_two = ({
 			},
 		});
 		applyCarousel(material, textures, carousel.center);
-		quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2, 64, 64), material);
+		quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2, 32, 32), material);
 		quad.frustumCulled = false;
 		scene.add(quad);
 		resize(window.innerWidth, window.innerHeight);
@@ -187,6 +190,7 @@ export const app_two = ({
 		renderer.setSize(w, h, false);
 		const buffer = renderer.getDrawingBufferSize(new THREE.Vector2());
 		material.uniforms.uResolution.value.copy(buffer);
+		dirty = true; // the buffer changed — repaint once even if idle
 	}
 
 	function draw() {
@@ -198,30 +202,31 @@ export const app_two = ({
 
 		// Frame-rate-independent damping: same easing feel at 60 or 120 Hz.
 		const smooth = 1 - Math.exp(-MOUSE_SMOOTH * delta);
+		// Are the pointer / drag still travelling toward their targets? Checked
+		// before easing so the frame that closes the gap still renders. Once within
+		// SETTLE_EPS we snap to target so the value stops drifting and the loop can
+		// idle (lerp approaches asymptotically and would never settle on its own).
+		const moving =
+			Math.abs(mouse.x - mouse.targetX) > SETTLE_EPS ||
+			Math.abs(mouse.y - mouse.targetY) > SETTLE_EPS ||
+			Math.abs(drag.x - drag.targetX) > SETTLE_EPS ||
+			Math.abs(drag.y - drag.targetY) > SETTLE_EPS;
 		mouse.x = lerp(mouse.x, mouse.targetX, smooth);
 		mouse.y = lerp(mouse.y, mouse.targetY, smooth);
+		if (Math.abs(mouse.x - mouse.targetX) <= SETTLE_EPS) mouse.x = mouse.targetX;
+		if (Math.abs(mouse.y - mouse.targetY) <= SETTLE_EPS) mouse.y = mouse.targetY;
 		material.uniforms.uMouse.value.set(mouse.x, mouse.y);
 		// Same easing for the touch drag, so the quad follows the finger and
 		// springs back to centre when the target is reset to 0 on release.
 		drag.x = lerp(drag.x, drag.targetX, smooth);
 		drag.y = lerp(drag.y, drag.targetY, smooth);
+		if (Math.abs(drag.x - drag.targetX) <= SETTLE_EPS) drag.x = drag.targetX;
+		if (Math.abs(drag.y - drag.targetY) <= SETTLE_EPS) drag.y = drag.targetY;
 		material.uniforms.uDrag.value.set(drag.x, drag.y);
 		material.uniforms.uTime.value = elapsed;
-		let bend;
-		if (touchMode) {
-			bend = 1;
-		} else {
-			const edgeBend = (coord) =>
-				Math.max(smoothstep(0.4, 0.0, coord), smoothstep(0.6, 1.0, coord));
-			bend = Math.max(edgeBend(mouse.x), edgeBend(mouse.y));
-			bend = bend <= 0.2 ? 0.2 : bend;
-		}
-		// Autoplay: ease the bend toward 1 (exponential damping, so it rushes in
-		// then holds at 1 for the rest of the reveal) and snap back to 0 once done.
-		// Max() so it only ever adds bend on top of whatever the cursor logic gave.
-		autoBend.t = autoReveal ? lerp(autoBend.t, 1, smooth) : 0;
-		bend = Math.max(bend, autoBend.t);
-		material.uniforms.uBend.value = bend;
+		// Bend is held fully on at all times — the quad keeps its spherical bulge
+		// regardless of pointer position, touch, or autoplay.
+		material.uniforms.uBend.value = 1;
 		// Ease the hover peek back in after a reveal so it doesn't pop in abruptly.
 		hoverFade.t = Math.min(hoverFade.t + delta / HOVER_FADE_DURATION, 1.0);
 		material.uniforms.uHoverFade.value = hoverFade.t;
@@ -270,11 +275,22 @@ export const app_two = ({
 			}
 		}
 
-		// Spin the quad continuously (radians). Time-based, so the speed stays the
-		// same at any refresh rate. The shader bypasses modelMatrix, so this drives
-		// uRotation rather than quad.rotation.
-
-		renderer.render(scene, camera);
+		// Render-on-demand: only touch the GPU when something is actually changing.
+		// A reveal/slide, the hover or peek crossfades easing toward 1, an autoplay
+		// bend ramp, or the pointer/drag still travelling all count as active; an
+		// untouched page is a static image, so we let the loop spin without redrawing
+		// and the GPU stays idle. `dirty` covers one-off repaints (resize, swaps).
+		const active =
+			dirty ||
+			moving ||
+			reveal.active ||
+			autoReveal ||
+			hoverFade.t < 1 ||
+			peekMix.t < 1;
+		if (active) {
+			renderer.render(scene, camera);
+			dirty = false;
+		}
 	}
 
 	// Drive the render loop. Kept inside the instance so the caller doesn't own
@@ -345,7 +361,10 @@ export const app_two = ({
 	// left↔right. Stores the flag even before init builds the material.
 	function setOrientation(isPortrait) {
 		axis = isPortrait ? 1 : 0;
-		if (material) material.uniforms.uAxis.value = axis;
+		if (material) {
+			material.uniforms.uAxis.value = axis;
+			dirty = true; // axis flips the neighbour mapping — repaint once
+		}
 	}
 
 	// Mark whether the device is touch (no hover). When true, the vertex bend is
@@ -373,6 +392,7 @@ export const app_two = ({
 		material.uniforms.uPeekMix.value = 1;
 		hoverFade.t = 1;
 		material.uniforms.uHoverFade.value = 1;
+		dirty = true; // settled crossfade won't flag a render — force one
 	}
 
 	// Swap in a new set of sources (e.g. the vertical variants when the viewport
@@ -416,6 +436,7 @@ export const app_two = ({
 		u.uPeekMix.value = 1;
 		hoverFade.t = 1;
 		u.uHoverFade.value = 1;
+		dirty = true; // new sources are bound — repaint once even if idle
 	}
 
 	// Free GPU resources when the component using this instance unmounts.
