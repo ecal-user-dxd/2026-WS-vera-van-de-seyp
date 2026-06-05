@@ -6,7 +6,10 @@ export function slugFromUrl(url) {
 
 const ARTIST_FIELDS = {
 	title: true,
-	url: true,
+	url: true, // the Kirby page URL — used by slugFromUrl below
+	// The artist's own website, entered in the CMS `url` content field. Read it
+	// explicitly via content.get so it isn't shadowed by the page-URL `url` above.
+	website: "page.content.get('url').value",
 	name: true,
 	surname: true,
 	file: "page.content.get('files').toFile?.url",

@@ -74,15 +74,18 @@ export function attachControls({
 			x: t.clientX / window.innerWidth,
 			y: 1 - t.clientY / window.innerHeight, // y-up, matching the shader
 		};
+		// A tap on the pill opens the artist's website; swipes still navigate the
+		// carousel. If the artist has no website, fall back to tap-to-navigate so
+		// the carousel stays usable on touch.
 		if (getPortrait()) {
 			if (Math.abs(dy) > SWIPE_THRESHOLD && Math.abs(dy) > Math.abs(dx))
 				app.navigate(dy < 0 ? 1 : -1, origin); // swipe up = next
-			else if (Math.hypot(dx, dy) < TAP_MAX_MOVE)
+			else if (Math.hypot(dx, dy) < TAP_MAX_MOVE && !app.openWebsite())
 				app.navigate(origin.y > 0.5 ? -1 : 1, origin); // tap top = prev
 		} else {
 			if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy))
 				app.navigate(dx < 0 ? 1 : -1, origin); // swipe left = next
-			else if (Math.hypot(dx, dy) < TAP_MAX_MOVE)
+			else if (Math.hypot(dx, dy) < TAP_MAX_MOVE && !app.openWebsite())
 				app.navigate(origin.x < 0.5 ? -1 : 1, origin); // tap left = prev
 		}
 		// Release the finger: ease the dragged quad back to centre.

@@ -26,6 +26,7 @@ export const app_two = ({
 	startIndex = 0,
 	onChange,
 	onReady,
+	onWebsite,
 } = {}) => {
 	// Normalise an images array into renderable sources: empty list → one
 	// fallback, and any missing entry → a random fallback image.
@@ -63,6 +64,12 @@ export const app_two = ({
 	let generation = 0;
 	const carousel = { center: startIndex % Math.max(sources.length, 1) };
 	const reveal = { active: false, t: 0, dir: 1 };
+	// Set while an autoplay-driven reveal is running so the vertex bend eases up to
+	// 1 (like touch) instead of tracking the idle cursor. Cleared on completion.
+	let autoReveal = false;
+	// Eased bend value for autoplay: ramps 0 -> 1 so the bend transitions in rather
+	// than snapping, then holds at 1 for the rest of the reveal.
+	const autoBend = { t: 0 };
 	let axis = 0;
 
 	let touchMode = false;
@@ -209,6 +216,11 @@ export const app_two = ({
 			bend = Math.max(edgeBend(mouse.x), edgeBend(mouse.y));
 			bend = bend <= 0.2 ? 0.2 : bend;
 		}
+		// Autoplay: ease the bend toward 1 (exponential damping, so it rushes in
+		// then holds at 1 for the rest of the reveal) and snap back to 0 once done.
+		// Max() so it only ever adds bend on top of whatever the cursor logic gave.
+		autoBend.t = autoReveal ? lerp(autoBend.t, 1, smooth) : 0;
+		bend = Math.max(bend, autoBend.t);
 		material.uniforms.uBend.value = bend;
 		// Ease the hover peek back in after a reveal so it doesn't pop in abruptly.
 		hoverFade.t = Math.min(hoverFade.t + delta / HOVER_FADE_DURATION, 1.0);
@@ -245,6 +257,7 @@ export const app_two = ({
 				// the new ones — the crossfade below blends between them.
 				applyCarousel(material, textures, carousel.center);
 				reveal.active = false;
+				autoReveal = false;
 				reveal.t = 0;
 				material.uniforms.uReveal.value = 0;
 				material.uniforms.uSlide.value = 0;
@@ -290,21 +303,31 @@ export const app_two = ({
 				drag.targetY = event.y;
 				break;
 			case "click":
+				// Touch taps are handled by touchend in controls.js (and would also
+				// fire a synthesised click here) — skip so they aren't handled twice.
+				if (touchMode) break;
 				// Vertical (portrait): top = prev, bottom = next (mouse.y is y-up).
 				if (axis === 1) {
 					navigate(mouse.y > 0.5 ? -1 : 1);
 				} else {
 					// Horizontal: three zones matching the cursor info label —
-					// left 0..0.4 = prev, right 0.6..1 = next, middle = website
-					// (label only for now, so a click there does nothing).
+					// left 0..0.4 = prev, right 0.6..1 = next, middle = website.
 					if (mouse.x < 0.4) navigate(-1);
 					else if (mouse.x > 0.6) navigate(1);
+					else openWebsite();
 				}
 				break;
 		}
 	}
 
-	function navigate(dir, origin) {
+	// Ask the page to open the current artist's website. Returns whatever the
+	// callback returns (true when a site was opened) so callers can fall back to
+	// carousel navigation when the artist has no link.
+	function openWebsite() {
+		return onWebsite?.() ?? false;
+	}
+
+	function navigate(dir, origin, { auto = false } = {}) {
 		if (!material || reveal.active || textures.length <= 1) return;
 		if (origin) {
 			mouse.x = mouse.targetX = origin.x;
@@ -312,6 +335,7 @@ export const app_two = ({
 			material.uniforms.uMouse.value.set(mouse.x, mouse.y);
 		}
 		reveal.active = true;
+		autoReveal = auto;
 		reveal.t = 0;
 		reveal.dir = dir;
 		material.uniforms.uRevealDir.value = dir;
@@ -413,6 +437,7 @@ export const app_two = ({
 		start,
 		onEventHandler,
 		navigate,
+		openWebsite,
 		setOrientation,
 		setTouch,
 		jumpTo,

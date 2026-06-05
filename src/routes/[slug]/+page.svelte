@@ -18,7 +18,11 @@
 	let isTouch = $state(false);
 	let pointer = $state({ x: 0.5, px: 0, py: 0 });
 	const onPointerMove = (ev) => {
-		pointer = { x: ev.clientX / window.innerWidth, px: ev.clientX, py: ev.clientY };
+		pointer = {
+			x: ev.clientX / window.innerWidth,
+			px: ev.clientX,
+			py: ev.clientY,
+		};
 	};
 
 	// Cursor matches the info label's zones on mouse devices: a directional
@@ -100,6 +104,14 @@
 				});
 			},
 			onReady: () => loading.set(false),
+			// Open the current artist's website in a new tab. Returns true when a
+			// site was opened so touch taps can fall back to carousel navigation.
+			onWebsite: () => {
+				const site = data.artists[currentIndex]?.website;
+				if (!site) return false;
+				window.open(site, "_blank", "noopener,noreferrer");
+				return true;
+			},
 		});
 		app.init();
 		app.setOrientation(isPortrait);
@@ -119,7 +131,38 @@
 
 		app.start();
 
+		// Desktop idle autoplay: after IDLE_MS without any input, advance to the
+		// next project, then keep advancing every IDLE_MS until the visitor acts.
+		// Any pointer/keyboard/scroll input resets the countdown. Touch devices
+		// (kiosks aside, phones/tablets) are excluded — this is for unattended
+		// desktop displays. Paused while the tab is hidden.
+		const IDLE_MS = 5000;
+		let idleTimer;
+		const tickAutoplay = () => {
+			if (app && !document.hidden) app.navigate(1, undefined, { auto: true });
+			idleTimer = setTimeout(tickAutoplay, IDLE_MS);
+		};
+		const resetAutoplay = () => {
+			clearTimeout(idleTimer);
+			idleTimer = setTimeout(tickAutoplay, IDLE_MS);
+		};
+		const ACTIVITY = ["mousemove", "mousedown", "wheel", "keydown"];
+		let detachAutoplay = () => {};
+		if (!isTouch) {
+			for (const type of ACTIVITY)
+				window.addEventListener(type, resetAutoplay, { passive: true });
+			document.addEventListener("visibilitychange", resetAutoplay);
+			resetAutoplay();
+			detachAutoplay = () => {
+				clearTimeout(idleTimer);
+				for (const type of ACTIVITY)
+					window.removeEventListener(type, resetAutoplay);
+				document.removeEventListener("visibilitychange", resetAutoplay);
+			};
+		}
+
 		return () => {
+			detachAutoplay();
 			detachControls();
 			app.dispose?.();
 			app = undefined;
@@ -153,21 +196,12 @@
 	{/key}
 </div>
 
-<canvas
-	bind:this={canvas}
-	id="canvas"
-	style:cursor
-	out:fade={{ duration: 400 }}
+<canvas bind:this={canvas} id="canvas" style:cursor out:fade={{ duration: 400 }}
 ></canvas>
 
 <svelte:window onmousemove={onPointerMove} />
 
-<ProjectInfo
-	x={pointer.x}
-	px={pointer.px}
-	py={pointer.py}
-	visible={!isTouch}
-/>
+<ProjectInfo x={pointer.x} px={pointer.px} py={pointer.py} visible={!isTouch} />
 
 <style>
 	#canvas {

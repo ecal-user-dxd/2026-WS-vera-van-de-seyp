@@ -67,7 +67,7 @@
 		flex-direction: column;
 		justify-content: center;
 		padding: 14rem 1.5rem;
-		font-size: 1.5rem;
+		font-size: 1rem;
 		line-height: 1.5;
 	}
 
