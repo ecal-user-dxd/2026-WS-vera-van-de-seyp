@@ -1,6 +1,20 @@
 import * as THREE from "three";
 import { lerp } from "./utils.js";
 
+// True while a texture wraps a video that is actively playing. A VideoTexture
+// only uploads a fresh frame when the renderer draws it, so render-on-demand
+// must keep drawing while one of these is on screen or the video looks frozen.
+const isPlayingVideo = (tex) => {
+	const v = tex && tex.image;
+	return (
+		typeof HTMLVideoElement !== "undefined" &&
+		v instanceof HTMLVideoElement &&
+		!v.paused &&
+		!v.ended &&
+		v.readyState >= 2
+	);
+};
+
 // Bundled fallbacks: any artist with no thumbnail in the CMS gets a random
 // one of these instead.
 import fallbackA from "../assets/CleanShot 2026-06-01 at 15.44.25@2x.png";
@@ -277,13 +291,21 @@ export const app_two = ({
 		// bend ramp, or the pointer/drag still travelling all count as active; an
 		// untouched page is a static image, so we let the loop spin without redrawing
 		// and the GPU stays idle. `dirty` covers one-off repaints (resize, swaps).
+		// A playing video on any bound slot (centre, or a neighbour shown via the
+		// hover peek / reveal) needs a fresh frame drawn every tick.
+		const u = material.uniforms;
+		const videoPlaying =
+			isPlayingVideo(u.uTextureB.value) ||
+			isPlayingVideo(u.uTextureA.value) ||
+			isPlayingVideo(u.uTextureC.value);
 		const active =
 			dirty ||
 			moving ||
 			reveal.active ||
 			autoReveal ||
 			hoverFade.t < 1 ||
-			peekMix.t < 1;
+			peekMix.t < 1 ||
+			videoPlaying;
 		if (active) {
 			renderer.render(scene, camera);
 			dirty = false;
