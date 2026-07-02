@@ -4,12 +4,37 @@ export function slugFromUrl(url) {
 	return String(url).replace(/\/+$/, "").split("/").pop();
 }
 
+function buildHostedWebsite({ routePrefix, routeName, fallbackUrl, slug }) {
+	const prefix = String(routePrefix ?? "")
+		.trim()
+		.replace(/^\/+|\/+$/g, "");
+	const name = String(routeName ?? "")
+		.trim()
+		.replace(/^\/+|\/+$/g, "");
+	const fallback = String(fallbackUrl ?? "").trim();
+
+	if (prefix) {
+		const finalName = name || slug || "";
+		const publishedPath = finalName
+			? `/published/${prefix}/${finalName}`
+			: `/published/${prefix}`;
+		if (typeof window !== "undefined" && window.location?.origin) {
+			return `https://admin.ecal-dxd.ch${publishedPath}`;
+		}
+		return publishedPath;
+	}
+
+	return fallback || undefined;
+}
+
 const ARTIST_FIELDS = {
 	title: true,
 	url: true, // the Kirby page URL — used by slugFromUrl below
-	// The artist's own website, entered in the CMS `url` content field. Read it
-	// explicitly via content.get so it isn't shadowed by the page-URL `url` above.
+	// The hosted website path is derived from the new CMS routing fields. We keep
+	// the legacy `url` value as a fallback for older entries.
 	website: "page.content.get('url').value",
+	route_prefix: "page.content.get('route_prefix').value",
+	route_name: "page.content.get('route_name').value",
 	name: true,
 	surname: true,
 	file: "page.content.get('files').toFile?.url",
@@ -35,11 +60,20 @@ export async function getArtists() {
 
 	console.log("infos", infos);
 
-	return (list ?? []).map((artist) => ({
-		...artist,
-		inofo: infos,
-		slug: slugFromUrl(artist.url),
-	}));
+	return (list ?? []).map((artist) => {
+		const slug = slugFromUrl(artist.url);
+		return {
+			...artist,
+			inofo: infos,
+			slug,
+			website: buildHostedWebsite({
+				routePrefix: artist.route_prefix,
+				routeName: artist.route_name,
+				fallbackUrl: artist.website,
+				slug,
+			}),
+		};
+	});
 }
 
 // The workshop's own content (title + description). Used by the /informations
