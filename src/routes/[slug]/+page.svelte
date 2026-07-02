@@ -182,7 +182,7 @@
 			in:wipeIn={{ direction, vertical: isPortrait }}
 			out:wipeOut={{ direction, vertical: isPortrait }}
 		>
-			<!-- <div class="title-layer">
+			<div class="title-layer">
 				{#each heading as line}
 					<h1 class="title">{line}</h1>
 				{/each}
@@ -191,7 +191,7 @@
 				{#each heading as line}
 					<h1 class="title">{line}</h1>
 				{/each}
-			</div> -->
+			</div>
 		</div>
 	{/key}
 </div>
