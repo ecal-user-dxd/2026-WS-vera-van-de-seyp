@@ -119,15 +119,14 @@ export const app_two = ({
 		// next navigation. Until a slot loads it points at the centre texture.
 		const n = sources.length;
 		const c = carousel.center;
-		const priority = [...new Set([c, (c - 1 + n) % n, (c + 1) % n])];
 		textures = new Array(n);
-		await Promise.all(
-			priority.map(async (i) => {
-				const tex = await loadTexture(sources[i]);
-				textures[i] = tex;
-				loaded.add(tex);
-			}),
-		);
+		// Block the loader on ONLY the centre texture — it's the single image the
+		// first paint shows. The neighbours are just peek/reveal targets and stream
+		// in via loadRemaining, so a slow (or failed) neighbour can't delay the
+		// loader clearing. Until each slot loads it points at the centre texture.
+		const centerTex = await loadTexture(sources[c]);
+		textures[c] = centerTex;
+		loaded.add(centerTex);
 		const center = textures[carousel.center];
 		// Fill not-yet-loaded slots with the centre texture so applyCarousel and
 		// the shader always have a valid sampler; loadRemaining swaps in the real
@@ -171,20 +170,31 @@ export const app_two = ({
 		scene.add(quad);
 		resize(window.innerWidth, window.innerHeight);
 
-		// The visible three are ready — clear the loader, then stream the rest.
+		// The centre image is ready — clear the loader, then stream everything
+		// else (neighbours first, so the first navigation has real textures ready).
 		onReady?.();
-		loadRemaining(priority);
+		loadRemaining([c]);
 	}
 
-	// Load every source not already loaded (the priority three are skipped) and
-	// swap each into its slot. These aren't visible until the carousel advances,
-	// by which point the slot holds the real texture instead of the placeholder.
+	// Load every source not already loaded (the skipped centre aside) and swap
+	// each into its slot. These aren't visible until the carousel advances, by
+	// which point the slot holds the real texture instead of the placeholder.
+	// The immediate neighbours load first so the first navigation is instant.
 	async function loadRemaining(skip) {
 		const gen = generation;
 		const mySources = sources;
-		const skipSet = new Set(skip);
-		for (let i = 0; i < mySources.length; i++) {
-			if (skipSet.has(i)) continue;
+		const n = mySources.length;
+		const c = carousel.center;
+		// Neighbours (prev/next) first, then the rest in order.
+		const order = [
+			(c - 1 + n) % n,
+			(c + 1) % n,
+			...Array.from({ length: n }, (_, i) => i),
+		];
+		const seen = new Set(skip);
+		for (const i of order) {
+			if (seen.has(i)) continue;
+			seen.add(i);
 			const tex = await loadTexture(mySources[i]);
 			// Bail if the instance was disposed or the source set was swapped.
 			if (!material || gen !== generation) {

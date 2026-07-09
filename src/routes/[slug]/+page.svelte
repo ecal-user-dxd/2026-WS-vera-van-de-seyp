@@ -83,6 +83,11 @@
 
 	onMount(() => {
 		loading.set(true);
+		// Safety net: clear the loader even if onReady never fires (e.g. an
+		// unforeseen texture stall). The texture loaders already fall back on
+		// failure, so this should rarely be needed — but it guarantees the site
+		// is never trapped behind the spinner.
+		const loaderGuard = setTimeout(() => loading.set(false), 15000);
 		canvas.style.width = window.innerWidth + "px";
 		canvas.style.height = window.innerHeight + "px";
 		isPortrait = window.innerHeight > window.innerWidth;
@@ -103,7 +108,10 @@
 					keepFocus: true,
 				});
 			},
-			onReady: () => loading.set(false),
+			onReady: () => {
+				clearTimeout(loaderGuard);
+				loading.set(false);
+			},
 			// Open the current artist's website in a new tab. Returns true when a
 			// site was opened so touch taps can fall back to carousel navigation.
 			onWebsite: () => {
@@ -162,6 +170,7 @@
 		}
 
 		return () => {
+			clearTimeout(loaderGuard);
 			detachAutoplay();
 			detachControls();
 			app.dispose?.();
@@ -182,16 +191,7 @@
 			in:wipeIn={{ direction, vertical: isPortrait }}
 			out:wipeOut={{ direction, vertical: isPortrait }}
 		>
-			<div class="title-layer">
-				{#each heading as line}
-					<h1 class="title">{line}</h1>
-				{/each}
-			</div>
-			<div class="title-layer title-blur" aria-hidden="true">
-				{#each heading as line}
-					<h1 class="title">{line}</h1>
-				{/each}
-			</div>
+		  
 		</div>
 	{/key}
 </div>
